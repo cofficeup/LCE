@@ -58,6 +58,14 @@ class UserSubscription extends Model
     }
 
     /**
+     * Get invoices for this subscription
+     */
+    public function invoices(): HasMany
+    {
+        return $this->hasMany(UserInvoice::class, 'subscription_id');
+    }
+
+    /**
      * Scope for active subscriptions
      */
     public function scopeActive($query)
