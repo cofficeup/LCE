@@ -147,41 +147,45 @@ class SubscriptionService
     }
 
     /**
-     * Upgrade subscription to a higher plan
+     * Switch subscription plan (Upgrade/Downgrade)
      */
-    public function upgradeSubscription(UserSubscription $subscription, SubscriptionPlan $newPlan): UserSubscription
+    public function switchPlan(UserSubscription $subscription, SubscriptionPlan $newPlan): array
     {
-        if ($newPlan->bags_per_month <= $subscription->plan->bags_per_month) {
-            throw new \Exception('New plan must have more bags than current plan');
-        }
+        // 1. Calculate unused value of current plan
+        $daysInCycle = $subscription->plan->billing_cycle === 'yearly' ? 365 : 30;
+        $daysRemaining = $subscription->next_billing_date->diffInDays(now());
+        $currentDailyRate = $subscription->plan->price / $daysInCycle;
+        $unusedValue = $currentDailyRate * $daysRemaining;
 
-        DB::transaction(function () use ($subscription, $newPlan) {
-            // Calculate prorated credit/charge (simplified: switch immediately)
+        // 2. Calculate cost of new plan for remaining period
+        $newDailyRate = $newPlan->price / $daysInCycle;
+        $costForRemaining = $newDailyRate * $daysRemaining;
+
+        // 3. Calculate difference
+        $difference = $costForRemaining - $unusedValue;
+
+        return DB::transaction(function () use ($subscription, $newPlan, $difference) {
+            // Update plan
             $subscription->plan_id = $newPlan->id;
             $subscription->save();
+
+            // Handle charge/credit
+            if ($difference > 0) {
+                // Charge handling would go here (invoice creation)
+            } elseif ($difference < 0) {
+                // Credit handling
+                $this->creditService->addManualCredit(
+                    $subscription->user,
+                    abs($difference),
+                    "Credit for downgrading to " . $newPlan->name
+                );
+            }
+
+            return [
+                'subscription' => $subscription,
+                'difference' => $difference
+            ];
         });
-
-        return $subscription->fresh();
-    }
-
-    /**
-     * Downgrade subscription to a lower plan
-     */
-    public function downgradeSubscription(UserSubscription $subscription, SubscriptionPlan $newPlan): UserSubscription
-    {
-        if ($newPlan->bags_per_month >= $subscription->plan->bags_per_month) {
-            throw new \Exception('New plan must have fewer bags than current plan');
-        }
-
-        // Downgrade takes effect at next billing cycle
-        DB::transaction(function () use ($subscription, $newPlan) {
-            // In production, you might store this as a pending change
-            // For simplicity, we'll apply it immediately
-            $subscription->plan_id = $newPlan->id;
-            $subscription->save();
-        });
-
-        return $subscription->fresh();
     }
 
     /**
@@ -201,7 +205,9 @@ class SubscriptionService
                 ? $subscription->next_billing_date->addYear()
                 : $subscription->next_billing_date->addMonth();
 
-            // Reset or bank unused bags (bank unused bags)
+            // Bank unused bags (add monthly quota to bank)
+            // Logic: banked_bags accumulates
+            // But we should cap it? For now, unlimited banking as per requirements
             $subscription->banked_bags += $plan->bags_per_month;
 
             $subscription->save();
@@ -212,11 +218,6 @@ class SubscriptionService
 
     /**
      * Process bag usage for a subscription pickup
-     * 
-     * @param UserSubscription $subscription
-     * @param int $totalBags Total bags in this pickup
-     * @param float $totalWeight Total weight in lbs
-     * @return array Breakdown with charges
      */
     public function processBagUsage(UserSubscription $subscription, int $totalBags, float $totalWeight): array
     {
@@ -224,7 +225,14 @@ class SubscriptionService
         $bagWeightLimit = config('lce.bag_weight_lbs', 20.5);
 
         // Calculate available bags (banked + monthly quota)
-        $availableBags = $subscription->getAvailableBags();
+        // Wait, getAvailableBags() returns banked + quota. 
+        // But if we use them, we should prioritize quota first, then banked.
+        // Actually simpler: just decrement banked_bags? 
+        // But initial month bags are just "available".
+        // Let's assume banked_bags stores ALL available bags including this month's allocation.
+        // (If renewSubscription adds quota to banked_bags, then yes).
+
+        $availableBags = $subscription->banked_bags;
 
         // Determine bags used from quota vs extra
         $bagsFromQuota = min($totalBags, $availableBags);

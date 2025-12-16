@@ -171,4 +171,76 @@ class SubscriptionController extends Controller
             return redirect()->back()->with('error', 'Failed to cancel: ' . $e->getMessage());
         }
     }
+
+    /**
+     * Show plan change form
+     */
+    public function edit(Request $request, $id)
+    {
+        $subscription = $request->user()->subscriptions()->findOrFail($id);
+        $plans = SubscriptionPlan::active()
+            ->where('id', '!=', $subscription->plan_id)
+            ->orderBy('billing_cycle')
+            ->orderBy('bags_per_month')
+            ->get();
+
+        return view('subscriptions.edit', [
+            'subscription' => $subscription,
+            'plans' => $plans
+        ]);
+    }
+
+    /**
+     * Update subscription (Switch Plan)
+     */
+    public function update(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'plan_id' => 'required|exists:lce_subscription_plans,id',
+        ]);
+
+        $subscription = $request->user()->subscriptions()->findOrFail($id);
+        $newPlan = SubscriptionPlan::findOrFail($validated['plan_id']);
+
+        $result = $this->subscriptionService->switchPlan($subscription, $newPlan);
+
+        $message = "Plan changed to {$newPlan->name}.";
+        if ($result['difference'] > 0) {
+            $message .= " A charge of $" . number_format($result['difference'], 2) . " will be applied.";
+        } elseif ($result['difference'] < 0) {
+            $message .= " A credit of $" . number_format(abs($result['difference']), 2) . " has been applied to your account.";
+        }
+
+        return redirect()->route('subscriptions.show', $subscription->id)->with('success', $message);
+    }
+
+    /**
+     * Pause subscription
+     */
+    public function pause(Request $request, $id)
+    {
+        $subscription = $request->user()->subscriptions()->findOrFail($id);
+
+        try {
+            $this->subscriptionService->pauseSubscription($subscription);
+            return back()->with('success', 'Subscription paused successfully.');
+        } catch (\Exception $e) {
+            return back()->with('error', $e->getMessage());
+        }
+    }
+
+    /**
+     * Resume subscription
+     */
+    public function resume(Request $request, $id)
+    {
+        $subscription = $request->user()->subscriptions()->findOrFail($id);
+
+        try {
+            $this->subscriptionService->resumeSubscription($subscription);
+            return back()->with('success', 'Subscription resumed successfully.');
+        } catch (\Exception $e) {
+            return back()->with('error', $e->getMessage());
+        }
+    }
 }

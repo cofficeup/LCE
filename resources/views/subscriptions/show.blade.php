@@ -12,6 +12,22 @@
             <p style="font-size: 24px; color: #007bff; margin: 10px 0;">
                 ${{ number_format($subscription->plan->price, 2) }}/{{ $subscription->plan->billing_cycle === 'monthly' ? 'month' : 'year' }}
             </p>
+            @if($subscription->status === 'active')
+            <div class="mb-3">
+                <a href="{{ route('subscriptions.edit', $subscription->id) }}" class="btn btn-outline-primary btn-sm">Change Plan</a>
+                <form action="{{ route('subscriptions.pause', $subscription->id) }}" method="POST" style="display:inline;" onsubmit="return confirm('Pause subscription? You won\'t be billed while paused.');">
+                    @csrf
+                    <button type="submit" class="btn btn-outline-warning btn-sm">Pause</button>
+                </form>
+            </div>
+            @elseif($subscription->status === 'paused')
+            <div class="mb-3">
+                <form action="{{ route('subscriptions.resume', $subscription->id) }}" method="POST" style="display:inline;">
+                    @csrf
+                    <button type="submit" class="btn btn-outline-success btn-sm">Resume Subscription</button>
+                </form>
+            </div>
+            @endif
             <p><strong>Status:</strong>
                 <span class="badge badge-{{ $subscription->status === 'active' ? 'success' : 'secondary' }}">
                     {{ strtoupper($subscription->status) }}

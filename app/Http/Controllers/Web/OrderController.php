@@ -78,4 +78,31 @@ class OrderController extends Controller
         return redirect()->route('payment.checkout', ['invoice_id' => $invoice->id])
             ->with('success', 'Order created! Please complete payment.');
     }
+
+    /**
+     * List user orders
+     */
+    public function index(Request $request)
+    {
+        $orders = $request->user()
+            ->pickups()
+            ->with(['invoice'])
+            ->latest()
+            ->paginate(10);
+
+        return view('orders.index', ['orders' => $orders]);
+    }
+
+    /**
+     * Show order details
+     */
+    public function show(Request $request, $id)
+    {
+        $order = $request->user()
+            ->pickups()
+            ->with(['invoice', 'invoice.lineItems'])
+            ->findOrFail($id);
+
+        return view('orders.show', ['order' => $order]);
+    }
 }
